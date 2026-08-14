@@ -62,3 +62,17 @@ func (h *CheckoutHandler) HealthCheck(c *gin.Context) {
 		"message": "service of checkout is running",
 	})
 }
+
+func (h *CheckoutHandler) GetSagaStatus(c *gin.Context) {
+	sagaID := c.Param("saga_id")
+	status := h.service.GetStatusSaga(sagaID)
+
+	if status == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Saga not found",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, status)
+}

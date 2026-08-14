@@ -10,15 +10,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/williamkoller/checkout-go/internal/models"
 	"github.com/williamkoller/checkout-go/internal/repository"
+	"github.com/williamkoller/checkout-go/internal/saga"
 )
 
 type CheckoutService struct {
 	repo        *repository.CheckoutRepository
 	redisClient *redis.Client
+	coordinator *saga.SagaCoordinator
 }
 
-func NewCheckoutService(repo *repository.CheckoutRepository, redisClient *redis.Client) *CheckoutService {
-	return &CheckoutService{repo: repo, redisClient: redisClient}
+func NewCheckoutService(repo *repository.CheckoutRepository, redisClient *redis.Client, coordinator *saga.SagaCoordinator) *CheckoutService {
+	return &CheckoutService{repo: repo, redisClient: redisClient, coordinator: coordinator}
 }
 
 func (s *CheckoutService) ProcessCheckout(ctx context.Context, req models.ProcessCheckoutRequest) (*models.ProcessCheckoutResponse, error) {
@@ -40,6 +42,7 @@ func (s *CheckoutService) ProcessCheckout(ctx context.Context, req models.Proces
 			Total:          s.calculateTotal(existingCheckout),
 			ProcessedIn:    existingCheckout.CreatedAt,
 			IdenpotencyKey: existingCheckout.IdempotencyKey,
+			SagaID: existingCheckout.SagaID,
 		}
 
 		s.cacheResult(ctx, cacheKey, response)
@@ -47,23 +50,35 @@ func (s *CheckoutService) ProcessCheckout(ctx context.Context, req models.Proces
 		return response, nil
 	}
 
-	var total float64
 	checkoutID := uuid.New().String()
+	sagaID := uuid.New().String()
 
-	for _, item := range req.Items {
-		total += item.Price * float64(item.Quantity)
-	}
-
-	checkout := &models.Checkout{
-		IDExternal:     checkoutID,
-		UserID:         req.UserID,
-		Items:          req.Items,
-		Status:         "processed",
+	sagaData := &saga.SagaData{
+		SagaID: sagaID,
+		CheckoutID: checkoutID,
+		UserID: req.UserID,
+		Items: req.Items,
 		IdempotencyKey: req.IdenpotencyKey,
+		Results: make(map[string]interface{}),
+		Errors: []string{},
 	}
 
-	if err := s.repo.Create(checkout); err != nil {
+	steps := []saga.Step{
+		&saga.StepValidateStock{},
+		&saga.StepProcessPayment{},
+		&saga.StepSaveCheckout{
+			CheckoutRepository: s.repo,
+		},
+	}
+
+	if err := s.coordinator.ExecuteSaga(ctx, steps, sagaData); err != nil {
 		return nil, fmt.Errorf("error in processed item: %v", err)
+	}
+
+	total := 0.0
+
+	if value, ok := sagaData.Results["amount_paid"]; ok {
+		total = value.(float64)
 	}
 
 	response := &models.ProcessCheckoutResponse{
@@ -72,6 +87,7 @@ func (s *CheckoutService) ProcessCheckout(ctx context.Context, req models.Proces
 		Total:          total,
 		ProcessedIn:    time.Now(),
 		IdenpotencyKey: req.IdenpotencyKey,
+		SagaID: sagaID,
 	}
 
 	s.cacheResult(ctx, cacheKey, response)
@@ -98,4 +114,8 @@ func (s *CheckoutService) cacheResult(ctx context.Context, key string, response 
 
 func (s *CheckoutService) GetCheckout(id string) (*models.Checkout, error) {
 	return s.repo.FindByID(id)
+}
+
+func (s *CheckoutService) GetStatusSaga(sagaID string) *models.SagaStatus {
+	return s.coordinator.GetSagaStatus(sagaID)
 }

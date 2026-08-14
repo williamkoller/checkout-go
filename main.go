@@ -12,6 +12,7 @@ import (
 	"github.com/williamkoller/checkout-go/internal/middleware"
 	"github.com/williamkoller/checkout-go/internal/models"
 	"github.com/williamkoller/checkout-go/internal/repository"
+	"github.com/williamkoller/checkout-go/internal/saga"
 	"github.com/williamkoller/checkout-go/internal/service"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -39,7 +40,8 @@ func main() {
 	}
 
 	repo := repository.NewCheckoutRepository(db)
-	service := service.NewCheckoutService(repo, redisClient)
+	coordinator := saga.NewSagaCoordinator()
+	service := service.NewCheckoutService(repo, redisClient, coordinator)
 	handler := handlers.NewCheckoutHandler(service)
 
 	router := gin.Default()
@@ -50,6 +52,7 @@ func main() {
 	{
 		api.POST("/checkout/process", handler.ProcessCheckout)
 		api.GET("/checkout/:id", handler.GetCheckout)
+		api.GET("/saga/:saga_id/status", handler.GetSagaStatus)
 		api.GET("/health", handler.HealthCheck)
 	}
 
