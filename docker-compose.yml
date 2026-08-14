@@ -1,0 +1,39 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: checkout-app
+    ports:
+      - "8082:8082"
+    environment:
+      - PORT=8082
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=
+      - GIN_MODE=release
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - redis
+    networks:
+      - checkout-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: checkout-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - checkout-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+volumes:
+  redis-data:
+
+networks:
+  checkout-network:
+    driver: bridge
