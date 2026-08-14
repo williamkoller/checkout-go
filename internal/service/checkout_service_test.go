@@ -8,6 +8,7 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/williamkoller/checkout-go/internal/models"
 	"github.com/williamkoller/checkout-go/internal/repository"
+	"github.com/williamkoller/checkout-go/internal/saga"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -33,7 +34,8 @@ func setupTestService(t *testing.T) (*CheckoutService, *gorm.DB) {
 	}
 
 	repo := repository.NewCheckoutRepository(db)
-	service := NewCheckoutService(repo, redisClient)
+	coordinator := saga.NewSagaCoordinator()
+	service := NewCheckoutService(repo, redisClient, coordinator)
 
 	return service, db
 }
@@ -44,8 +46,8 @@ func TestProcessCheckoutWithMultipleItemsCreatesSingleRow(t *testing.T) {
 	req := models.ProcessCheckoutRequest{
 		UserID: "user-1",
 		Items: []models.ItemCheckout{
-			{ProductId: "prod-001", Quantity: 2, Price: 10.0},
-			{ProductId: "prod-002", Quantity: 1, Price: 5.0},
+			{ProductID: "prod-001", Quantity: 2, Price: 10.0, Stock: 10},
+			{ProductID: "prod-002", Quantity: 1, Price: 5.0, Stock: 10},
 		},
 		IdenpotencyKey: "idem-abc",
 	}
@@ -75,7 +77,7 @@ func TestProcessCheckoutWithCorruptedCacheFallsBackToDB(t *testing.T) {
 	req := models.ProcessCheckoutRequest{
 		UserID: "user-1",
 		Items: []models.ItemCheckout{
-			{ProductId: "prod-001", Quantity: 2, Price: 10.0},
+			{ProductID: "prod-001", Quantity: 2, Price: 10.0, Stock: 10},
 		},
 		IdenpotencyKey: "idem-cached",
 	}
@@ -104,7 +106,7 @@ func TestProcessCheckoutIdempotent(t *testing.T) {
 	req := models.ProcessCheckoutRequest{
 		UserID: "user-1",
 		Items: []models.ItemCheckout{
-			{ProductId: "prod-001", Quantity: 2, Price: 10.0},
+			{ProductID: "prod-001", Quantity: 2, Price: 10.0, Stock: 10},
 		},
 		IdenpotencyKey: "idem-abc",
 	}
